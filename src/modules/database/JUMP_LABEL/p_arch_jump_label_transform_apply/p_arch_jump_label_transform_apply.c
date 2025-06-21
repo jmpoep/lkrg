@@ -33,15 +33,20 @@
 
 #ifdef P_LKRG_CI_ARCH_JUMP_LABEL_TRANSFORM_APPLY_H
 
-static unsigned long p_jl_batch_addr[P_TP_VEC_MAX];
-static unsigned int p_jl_batch_nr;
+static bool p_text, p_mod;
 
 
 static notrace int p_arch_jump_label_transform_apply_entry(struct kretprobe_instance *p_ri, struct pt_regs *p_regs) {
 
+#ifdef TEXT_POKE_MAX_OPCODE_SIZE
+   int p_nr = P_SYM(p_text_poke_array)->nr_entries;
+#else
    int p_nr = *P_SYM(p_tp_vec_nr);
-   int p_cnt = 0;
+#endif
+   int p_cnt, p_mod_id;
+   unsigned long p_addr;
    p_text_poke_loc *p_tmp;
+   struct module *p_module;
 
    p_debug_kprobe_log(
           "p_arch_jump_label_transform_apply_entry: comm[%s] Pid:%d",current->comm,current->pid);
@@ -59,40 +64,15 @@ static notrace int p_arch_jump_label_transform_apply_entry(struct kretprobe_inst
    p_print_log(P_LOG_WATCH,
                "[JUMP_LABEL <batch mode>] New modifications => %d",p_nr);
 
-   for (p_jl_batch_nr = 0; p_cnt < p_nr; p_cnt++) {
-      p_tmp = (p_text_poke_loc *)&P_SYM(p_tp_vec)[p_jl_batch_nr*sizeof(p_text_poke_loc)];
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0) || \
-    defined(P_LKRG_KERNEL_RHEL_VAR_LEN_JUMP_LABEL)
-      if ( (p_tmp->opcode == CALL_INSN_OPCODE
-            || p_tmp->opcode == JMP32_INSN_OPCODE
-            || p_tmp->opcode == INT3_INSN_OPCODE
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 10, 0) || \
-    defined(P_LKRG_KERNEL_RHEL_VAR_LEN_JUMP_LABEL)
-            || p_tmp->opcode == RET_INSN_OPCODE
-#endif
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 14, 0) || \
-    defined(P_LKRG_KERNEL_RHEL_VAR_LEN_JUMP_LABEL)
-            || p_tmp->opcode == JMP8_INSN_OPCODE
-#endif
-            ) &&
-          p_tmp->rel_addr) {
-#else
-      if ( (p_tmp->len == 5
-#if P_LKRG_KERNEL_HAS_VAR_LEN_JUMP_LABEL
-            || p_tmp->len == 2
-#endif
-            ) &&
-          p_tmp->addr
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 5, 0) || \
-   (defined(RHEL_RELEASE_CODE) && RHEL_RELEASE_CODE >= RHEL_RELEASE_VERSION(8, 3)) || \
-   (defined(CONFIG_SUSE_PRODUCT_CODE) && CONFIG_SUSE_PRODUCT_CODE == 1)
-          && p_tmp->opcode) {
-#else
-          && p_tmp->detour) {
-#endif
+   p_text = p_mod = false;
 
+   for (p_cnt = 0; p_cnt < p_nr; p_cnt++) {
+#ifdef TEXT_POKE_MAX_OPCODE_SIZE
+      p_tmp = &P_SYM(p_text_poke_array)->vec[p_cnt];
+#else
+      p_tmp = &P_SYM(p_tp_vec)[p_cnt];
 #endif
-         p_jl_batch_addr[p_jl_batch_nr++] =
+      p_addr =
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 6, 0) || \
     defined(P_LKRG_KERNEL_RHEL_VAR_LEN_JUMP_LABEL)
                   (unsigned long)p_tmp->rel_addr +
@@ -100,6 +80,27 @@ static notrace int p_arch_jump_label_transform_apply_entry(struct kretprobe_inst
 #else
                   (unsigned long)p_tmp->addr;
 #endif
+      if (P_SYM(p_core_kernel_text)(p_addr)) {
+         p_text = true;
+      } else if ((p_module = LKRG_P_MODULE_TEXT_ADDRESS(p_addr))) {
+         for (p_mod_id = 0; p_mod_id < p_db.p_module_list_nr; p_mod_id++) {
+            if (p_db.p_module_list_array[p_mod_id].p_mod == p_module) {
+               /*
+                * OK, we found this module on our internal tracking list.
+                */
+               p_db.p_module_list_array[p_mod_id].p_stale = true;
+               if (p_mod) /* the rest of p_stale fields already initialized */
+                  break;
+            } else if (!p_mod) /* need to initialize them all */
+               p_db.p_module_list_array[p_mod_id].p_stale = false;
+         }
+         p_mod = true;
+      } else {
+         /*
+          * FTRACE might generate dynamic trampoline which is not part of .text section.
+          * This is not abnormal situation anymore.
+          */
+         p_print_log(P_LOG_WATCH, "[JUMP_LABEL <batch mode>] Not a .text section! [0x%lx]", p_addr);
       }
    }
 
@@ -111,45 +112,8 @@ static notrace int p_arch_jump_label_transform_apply_entry(struct kretprobe_inst
 static notrace int p_arch_jump_label_transform_apply_ret(struct kretprobe_instance *ri, struct pt_regs *p_regs) {
 
    struct module *p_module = NULL;
-   unsigned int p_cnt;
    unsigned int p_tmp,p_tmp2;
    unsigned char p_flag = 0;
-   unsigned int p_text = 0;
-   unsigned int p_mod = 0;
-//   DECLARE_BITMAP(p_mod_mask, p_db.p_module_list_nr);
-
-   bitmap_zero(p_db.p_jump_label.p_mod_mask, p_db.p_module_list_nr);
-
-   for (p_cnt = 0; p_cnt < p_jl_batch_nr; p_cnt++) {
-
-      if (P_SYM(p_core_kernel_text)(p_jl_batch_addr[p_cnt])) {
-
-         p_text++;
-
-      } else if ( (p_module = LKRG_P_MODULE_TEXT_ADDRESS(p_jl_batch_addr[p_cnt])) != NULL) {
-
-         for (p_tmp = 0; p_tmp < p_db.p_module_list_nr; p_tmp++) {
-            if (p_db.p_module_list_array[p_tmp].p_mod == p_module) {
-
-               /*
-                * OK, we found this module on our internal tracking list.
-                * Set bit in bitmask
-                */
-               set_bit(p_tmp, p_db.p_jump_label.p_mod_mask);
-               p_mod++;
-               break;
-            }
-         }
-
-      } else {
-         /*
-          * FTRACE might generate dynamic trampoline which is not part of .text section.
-          * This is not abnormal situation anymore.
-          */
-         p_print_log(P_LOG_WATCH,
-                     "[JUMP_LABEL <batch mode>] Not a .text section! [0x%lx]",p_jl_batch_addr[p_cnt]);
-      }
-   }
 
    if (p_text) {
       /*
@@ -170,7 +134,7 @@ static notrace int p_arch_jump_label_transform_apply_ret(struct kretprobe_instan
 
    if (p_mod) {
       for (p_tmp = 0; p_tmp < p_db.p_module_list_nr; p_tmp++) {
-         if (test_bit(p_tmp, p_db.p_jump_label.p_mod_mask)) {
+         if (p_db.p_module_list_array[p_tmp].p_stale) {
 
             /*
              * OK, we found this module on our internal tracking list.
@@ -197,6 +161,7 @@ static notrace int p_arch_jump_label_transform_apply_ret(struct kretprobe_instan
             /*
              * Because we update module's .text section hash we need to update KOBJs as well.
              */
+            p_flag = 0;
             for (p_tmp2 = 0; p_tmp2 < p_db.p_module_kobj_nr; p_tmp2++) {
                if (p_db.p_module_kobj_array[p_tmp2].p_mod == p_module) {
                   p_db.p_module_kobj_array[p_tmp2].p_mod_core_text_hash =
