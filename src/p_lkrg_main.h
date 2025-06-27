@@ -18,7 +18,7 @@
 #ifndef P_LKRG_MAIN_H
 #define P_LKRG_MAIN_H
 
-#define P_LKRG_UNHIDE
+#define LKRG_WITH_HIDE
 #define P_BOOT_DISABLE_LKRG "nolkrg"
 
 #include <linux/kernel.h>
@@ -109,6 +109,8 @@ static inline unsigned long get_random_long(void) {
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(4,11,0)
 #include <linux/sched/task_stack.h>
 #endif
+
+#include "modules/database/JUMP_LABEL/p_arch_jump_label_transform_apply/p_arch_jump_label_transform_apply.h"
 
 /*
  * Define kmem_cache_create() flags:
@@ -237,8 +239,14 @@ typedef struct _p_lkrg_global_symbols_structure {
 #ifdef CONFIG_TRACEPOINTS
    struct mutex *p_tracepoints_mutex;
 #endif
-   struct text_poke_loc **p_tp_vec;
+#ifdef P_LKRG_CI_ARCH_JUMP_LABEL_TRANSFORM_APPLY_H
+#ifdef TEXT_POKE_MAX_OPCODE_SIZE
+   struct p_text_poke_array *p_text_poke_array;
+#else
+   p_text_poke_loc *p_tp_vec;
    int *p_tp_vec_nr;
+#endif
+#endif
 #if defined(CONFIG_DYNAMIC_DEBUG)
    struct list_head *p_ddebug_tables;
    struct mutex *p_ddebug_lock;
