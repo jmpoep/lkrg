@@ -78,10 +78,23 @@ typedef struct _p_text_poke_loc {
     s32 disp;
     u8 len;
     u8 opcode;
+/* The TEXT_POKE_MAX_OPCODE_SIZE name is used since 6.16-rc */
+  #ifdef TEXT_POKE_MAX_OPCODE_SIZE
+    const u8 text[TEXT_POKE_MAX_OPCODE_SIZE];
+  #else
     const u8 text[POKE_MAX_OPCODE_SIZE];
+  #endif
     /* see text_poke_bp_batch() */
     u8 old;
 } p_text_poke_loc;
+  #ifdef TEXT_POKE_MAX_OPCODE_SIZE
+   #define TEXT_POKE_ARRAY_MAX (PAGE_SIZE / sizeof(p_text_poke_loc))
+struct p_text_poke_array {
+    p_text_poke_loc vec[TEXT_POKE_ARRAY_MAX];
+    int nr_entries;
+};
+  #endif
+
  #endif
 #else
 typedef struct text_poke_loc p_text_poke_loc;

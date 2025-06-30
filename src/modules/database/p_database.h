@@ -50,19 +50,6 @@ typedef struct p_cpu_info {
                       // when CPU is hotplug
    int active_CPUs;   // Currently active CPUs - can execute tasks
 
-/*
- * "include/linux/cpumask.h"
- * ...
- * 34 #if NR_CPUS == 1
- * 35 #define nr_cpu_ids              1
- * 36 #else
- * 37 extern int nr_cpu_ids;
- * 38 #endif
- * ...
- */
-
-   int p_nr_cpu_ids;  // Should be the same as possible_CPUs
-
 } p_cpu_info;
 
 #define P_CPU_OFFLINE 0
@@ -117,7 +104,6 @@ struct p_jump_label {
 
    enum p_jump_label_state p_state;
    struct module *p_mod;
-   unsigned long *p_mod_mask;
 
 };
 
@@ -240,7 +226,7 @@ static inline void p_text_section_unlock(void) {
 
 int p_create_database(void);
 void p_get_cpus(p_cpu_info *p_arg);
-int p_cmp_cpus(p_cpu_info *p_arg1, p_cpu_info *p_arg2);
+void p_cmp_cpus(p_cpu_info *p_arg1, p_cpu_info *p_arg2);
 #if LINUX_VERSION_CODE < KERNEL_VERSION(4,10,0)
 int p_cpu_callback(struct notifier_block *p_block, unsigned long p_action, void *p_hcpu);
 #endif
